@@ -140,12 +140,18 @@ def loop_collapse(loop_start, loop_end, compval, idx, mval, multconst):
 
 # this is symbolic 2.0
 constant_folder = PatternMatcher([
-  # # arange loop folding (early)
+  # arange loop folding (early)
   # ({"uop": UOps.ALU, "arg": TernaryOps.WHERE, "vin": ({"uop": UOps.ALU, "arg": BinaryOps.CMPLT, "vin": (
   #   {"uop": UOps.ALU, "arg": BinaryOps.ADD, "vin":
   #     [{"__name__": "idx"}, {"uop": UOps.ALU, "arg": BinaryOps.MUL,
   #       "vin": [{"__name__": "mval", "uop": UOps.CONST}, {"uop": UOps.RANGE, "vin": ({"__name__": "loop_start"}, {"__name__": "loop_end"})}]}]},
   #     {"__name__": "compval", "uop": UOps.CONST})}, {"__name__": "multconst", "uop": UOps.CONST}, {"uop": UOps.CONST, "arg": 0})}, loop_collapse),
+  (UPat(uop=UOps.ALU, arg=TernaryOps.WHERE, vin=(UPat(uop=UOps.ALU, arg=BinaryOps.CMPLT, vin=(
+      UPat(uop=UOps.ALU, arg=BinaryOps.ADD, vin=
+          [UPat(name="idx"), UPat(uop=UOps.ALU, arg=BinaryOps.MUL,
+              vin=[UPat(name="mval", uop=UOps.CONST), UPat(uop=UOps.RANGE, vin=(UPat(name="loop_start"), UPat(name="loop_end")))]
+          )])
+  )))), loop_collapse),
   # # sum collapse to mul (with possible GEP)
   # ({"uop": UOps.PHI, "vin": ({"__name__": "phi_input", "uop": UOps.DEFINE_ACC, "vin": ({"uop": UOps.RANGE, "__name__": "loop"},)},
   #     {"uop": UOps.ALU, "arg": BinaryOps.ADD, "vin": ({"__name__": "val1"}, {"__name__": "val2"})})}, sum_collapse),
@@ -193,13 +199,11 @@ constant_folder = PatternMatcher([
   # ({"__name__": "root", "uop": UOps.ALU, "vin": {"uop": UOps.CONST}},
   #   lambda root: UOp.const(root.dtype, exec_alu(root.arg, root.dtype, [x.arg for x in root.vin]))),
   # ** self folding **
-  # ({"uop": UOps.ALU, "arg": BinaryOps.ADD, "vin": [{"__name__": "x"}, {"uop": UOps.CONST, "arg": 0}]}, lambda x: x),   # x+0 -> x or 0+x -> x
   (UPat(uop=UOps.ALU, arg=BinaryOps.ADD, vin=[UPat(name="x"), UPat(uop=UOps.CONST, arg=0)]), lambda x: x),   # x+0 -> x or 0+x -> x
-  # ({"uop": UOps.ALU, "arg": BinaryOps.MUL, "vin": [{"__name__": "x"}, {"uop": UOps.CONST, "arg": 1}]}, lambda x: x),   # x*1 -> x or 1*x -> x
-  # ({"uop": UOps.ALU, "arg": BinaryOps.SUB, "vin": ({"__name__": "x"}, {"uop": UOps.CONST, "arg": 0})}, lambda x: x),   # x-0 -> x
-  # ({"uop": UOps.ALU, "arg": BinaryOps.DIV, "vin": ({"__name__": "x"}, {"uop": UOps.CONST, "arg": 1})}, lambda x: x),   # x/1 -> x
-  # ({"uop": UOps.ALU, "arg": BinaryOps.DIV, "vin": ({"__name__": "x"}, {"uop": UOps.CONST, "arg": -1})}, lambda x: -x), # x/-1 -> -x
-  (UPat(uop=UOps.ALU, arg=BinaryOps.DIV, vin=[UPat(name="x"), UPat(uop=UOps.CONST, arg=-1)]), lambda x: -x),  # x/-1 -> -x
+  (UPat(uop=UOps.ALU, arg=BinaryOps.MUL, vin=[UPat(name="x"), UPat(uop=UOps.CONST, arg=1)]), lambda x: x),   # x*1 -> x or 1*x -> x
+  (UPat(uop=UOps.ALU, arg=BinaryOps.SUB, vin=[UPat(name="x"), UPat(uop=UOps.CONST, arg=0)]), lambda x: x),   # x-0 -> x
+  (UPat(uop=UOps.ALU, arg=BinaryOps.DIV, vin=[UPat(name="x"), UPat(uop=UOps.CONST, arg=1)]), lambda x: x),   # x/1 -> x
+  (UPat(uop=UOps.ALU, arg=BinaryOps.DIV, vin=[UPat(name="x"), UPat(uop=UOps.CONST, arg=-1)]), lambda x: -x), # x/-1 -> -x
   # ** zero folding **
   # ({"uop": UOps.ALU, "arg": BinaryOps.MUL, "vin": [{}, {"__name__": "c", "uop": UOps.CONST, "arg": 0}]}, lambda c: c), # x*0 -> 0 or 0*x -> 0
   # ({"uop": UOps.ALU, "arg": BinaryOps.SUB, "vin": ({"__name__": "x"}, {"__name__": "x"})}, lambda x: UOp.const(x.dtype, 0)),   # x-x -> 0
