@@ -341,3 +341,126 @@ def pretty_print(x:Any, rep:Callable, srcfn=lambda x: x.src, cache=None, d=0)->s
   if (cx:=cache.setdefault(x, [0,0,False]))[2]: return f"{' '*d} x{cx[0]}"
   cx[2], srcs = True, ('None' if srcfn(x) is None else''.join(f'\n{pretty_print(s, rep, srcfn, cache, d+2)},' for s in srcfn(x)))
   return f"{' '*d}{f'x{cx[0]}:=' * (cx[1]>1)}{rep(x)}" % srcs
+
+# *** objc
+
+import ctypes
+from ctypes.util import find_library
+from ctypes import cdll, c_char_p, c_void_p, c_bool, CDLL, c_uint, c_ulong, util, c_int
+
+def ensure_bytes(bs): return bs if isinstance(bs, bytes) else bs.encode()
+
+import tinygrad.runtime.autogen.objc as objc
+
+libobjc = CDLL(util.find_library("objc"))
+libobjc.objc_msgSend.restype, libobjc.objc_msgSend.argtypes = c_void_p, [c_void_p, c_void_p]
+libobjc.objc_getClass.restype, libobjc.objc_getClass.argtypes = c_void_p, [c_char_p]
+libobjc.class_copyMethodList.restype, libobjc.class_copyMethodList.argtypes = ctypes.POINTER(c_void_p), [c_void_p, ctypes.POINTER(c_uint)]
+libobjc.class_getName.restype, libobjc.class_getName.argtypes = c_char_p, [c_void_p]
+libobjc.sel_registerName.restype, libobjc.sel_registerName.argtypes = c_void_p, [c_char_p]
+# libobjc.sel_getName.restype, libobjc.sel_getName.argtypes = c_char_p, [c_void_p]
+libobjc.method_getName.restype, libobjc.method_getName.argtypes = c_void_p, [c_void_p]
+libobjc.method_getTypeEncoding.restype, libobjc.method_getTypeEncoding.argtypes = c_char_p, [c_void_p]
+libobjc.method_copyReturnType.restype, libobjc.method_copyReturnType.argtypes = c_char_p, [c_void_p]
+libobjc.method_getNumberOfArguments.restype, libobjc.method_getNumberOfArguments.argtypes = c_uint, [c_void_p]
+libobjc.method_copyArgumentType.restype, libobjc.method_copyArgumentType.argtypes = c_char_p, [c_void_p, c_uint]
+
+def objc_msgSend(obj, sel, *args, restype=c_void_p, argtypes=[]):
+  print(f"Sending {sel}({restype} {argtypes}) to {obj} with {args}")
+  exit(0)
+  libobjc.objc_msgSend.restype, libobjc.objc_msgSend.argtypes = restype, [c_void_p, c_void_p] + argtypes if argtypes else [c_void_p, c_void_p]
+  return libobjc.objc_msgSend(obj, libobjc.sel_registerName(sel.encode()), *args)
+
+libc = cdll.LoadLibrary(find_library("c"))
+libc.malloc.argtypes = [ctypes.c_size_t]
+libc.malloc.restype = ctypes.c_void_p
+libc.free.argtypes = [ctypes.c_void_p]
+
+def dump_objc_methods(clz: c_void_p):
+  methods = {}
+  method_count = ctypes.c_uint()
+  methods_ptr = libobjc.class_copyMethodList(clz, ctypes.byref(method_count))
+  assert methods_ptr is not None, f"Failed to get methods for class {clz}"
+
+  class_name = libobjc.class_getName(clz).decode('ascii')
+  print(f"Found {method_count} methods on '{class_name}'")
+
+  for i in range(method_count.value):
+    method = methods_ptr[i]
+    sel_name = libobjc.sel_getName(libobjc.method_getName(method)).decode('ascii')
+    sel_encoding = libobjc.method_getTypeEncoding(method).decode('ascii')
+    return_type_ptr = libobjc.method_copyReturnType(method)
+    return_type = return_type_ptr.decode('ascii')
+    argtypes_ptrs = [libobjc.method_copyArgumentType(method, i) for i in range(libobjc.method_getNumberOfArguments(method))]
+    argtypes = [arg.decode('ascii') for arg in argtypes_ptrs]
+    print(f"\tMethod {i}: {sel_name} {sel_encoding} ({return_type} {argtypes})")
+    methods[sel_name] = {"encoding": sel_encoding, "restype": return_type, "argtypes": argtypes}
+
+    # _, _ = libc.free(ctypes.cast(return_type_ptr, c_void_p)), [libc.free(ctypes.cast(argtype, c_void_p)) for argtype in argtypes_ptrs]
+  libc.free(methods_ptr)
+  return methods
+
+
+SIMPLE_TYPES = {
+    'c': ctypes.c_char,
+    'i': ctypes.c_int,
+    's': ctypes.c_short,
+    'l': ctypes.c_long,
+    'q': ctypes.c_longlong,
+    'C': ctypes.c_uint8,
+    'I': ctypes.c_uint,
+    'S': ctypes.c_ushort,
+    'L': ctypes.c_ulong,
+    'Q': ctypes.c_ulonglong,
+    'f': ctypes.c_float,
+    'd': ctypes.c_double,
+    'B': ctypes.c_bool,
+    'v': None,
+    '*': ctypes.c_char_p,
+    '@': ctypes.c_void_p,
+    '#': 'Class',
+    ':': 'SEL',
+    '?': '<unknown-type>',
+}
+
+def get_methods_rec(c: ctypes.c_void_p):
+  methods = {}
+  while c:
+    methods = {
+      **methods,
+      **dump_objc_methods(c)
+    }
+    c = libobjc.class_getSuperclass(c)
+  return methods
+
+
+def objc_type_to_ctype(t: str):
+  if len(t) == 1:
+    return SIMPLE_TYPES[t]
+  elif t[0] == '^':
+    return ctypes.POINTER(objc_type_to_ctype(t[1:]))
+  elif t[0] == 'r':
+    return objc_type_to_ctype(t[1:])
+  else:
+    raise ValueError(f"Unknown type {t}")
+
+def makeObjcClass(name: str) -> Any:
+  _class_ptr = libobjc.objc_getClass(ensure_bytes(name))
+  assert _class_ptr is not None, f"Class {name} not found"
+  objc_methods = {
+    # **get_methods_rec(_class_ptr),
+    **get_methods_rec(_metaclass_ptr:=libobjc.object_getClass(_class_ptr))}
+
+  for k,v in objc_methods.items():
+    print(k,v)
+
+  print("#" * 80)
+  return {
+    k.replace(":", "_"): functools.partial(objc_msgSend, k, argtypes=[objc_type_to_ctype(t) for t in v["argtypes"][2:]], restype=objc_type_to_ctype(v["restype"])) #objc_msgSend(_class_ptr, k, *args, argtypes=[objc_type_to_ctype(t) for t in v["argtypes"][2:]], restype=objc_type_to_ctype(v["restype"]))
+    for k, v in objc_methods.items() # if all([t in SIMPLE_TYPES for t in v["argtypes"]]) and v["restype"] in SIMPLE_TYPES
+  }
+  # return type(name, (object,), {
+  #   k.replace(":", "_"): lambda *args: print(f"{k}({args})", k, v) #objc_msgSend(_class_ptr, k, *args, argtypes=[objc_type_to_ctype(t) for t in v["argtypes"][2:]], restype=objc_type_to_ctype(v["restype"]))
+  #   for k, v in objc_methods.items() # if all([t in SIMPLE_TYPES for t in v["argtypes"]]) and v["restype"] in SIMPLE_TYPES
+  #     # "__del__": lambda self: print(f"Deleting {name}"), # maybe release?
+  # })
