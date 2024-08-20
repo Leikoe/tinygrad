@@ -343,6 +343,7 @@ def pretty_print(x:Any, rep:Callable, srcfn=lambda x: x.src, cache=None, d=0)->s
   return f"{' '*d}{f'x{cx[0]}:=' * (cx[1]>1)}{rep(x)}" % srcs
 
 # *** objc
+# note: The Objective-C runtime does not expose enough information to provide completely automatic bindings of all APIs. source: https://pyobjc.readthedocs.io/en/latest/metadata/index.html
 from ctypes.util import find_library
 
 
@@ -359,8 +360,6 @@ from ctypes.util import find_library
 #     print(f"finished {f.__name__}")
 #     return res
 #   return logging_fn
-
-def ensure_bytes(bs): return bs if isinstance(bs, bytes) else bs.encode()
 
 # import tinygrad.runtime.autogen.objc as objc
 
@@ -382,7 +381,7 @@ libobjc.class_getSuperclass.restype, libobjc.class_getSuperclass.argtypes = ctyp
 
 
 def convert_arg(arg, type):
-  if isinstance(arg, str) and type is ctypes.c_char_p: return ensure_bytes(arg)
+  if isinstance(arg, str) and type is ctypes.c_char_p: return arg.encode()
   if isinstance(arg, str) and type is ctypes.c_void_p: return NSString.stringWithUTF8String_(arg).ptr
   if isinstance(arg, ObjcClass): return arg.ptr
   return arg
@@ -477,7 +476,7 @@ class ObjcClass:
 
   # @log_wrapper
   def __init__(self, name:str):
-    self.ptr = libobjc.objc_getClass(ensure_bytes(name))
+    self.ptr = libobjc.objc_getClass(name.encode())
     assert self.ptr is not None, f"Class {name} not found"
     self.methods_info = get_methods_rec(_metaclass_ptr:=libobjc.object_getClass(self.ptr))
 
