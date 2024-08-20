@@ -343,58 +343,80 @@ def pretty_print(x:Any, rep:Callable, srcfn=lambda x: x.src, cache=None, d=0)->s
   return f"{' '*d}{f'x{cx[0]}:=' * (cx[1]>1)}{rep(x)}" % srcs
 
 # *** objc
-
-import ctypes
 from ctypes.util import find_library
-from ctypes import cdll, c_char_p, c_void_p, c_bool, CDLL, c_uint, c_ulong, util, c_int
+
+
+# class dotdict(dict):
+#   """dot.notation access to dictionary attributes"""
+#   __getattr__ = dict.get
+#   __setattr__ = dict.__setitem__
+#   __delattr__ = dict.__delitem__
+
+# def log_wrapper(f):
+#   def logging_fn(*args, **kwargs):
+#     print(f"calling {f.__name__}")
+#     res = f(*args, **kwargs)
+#     print(f"finished {f.__name__}")
+#     return res
+#   return logging_fn
 
 def ensure_bytes(bs): return bs if isinstance(bs, bytes) else bs.encode()
 
-import tinygrad.runtime.autogen.objc as objc
+# import tinygrad.runtime.autogen.objc as objc
 
-libobjc = CDLL(util.find_library("objc"))
-libobjc.objc_msgSend.restype, libobjc.objc_msgSend.argtypes = c_void_p, [c_void_p, c_void_p]
-libobjc.objc_getClass.restype, libobjc.objc_getClass.argtypes = c_void_p, [c_char_p]
-libobjc.class_copyMethodList.restype, libobjc.class_copyMethodList.argtypes = ctypes.POINTER(c_void_p), [c_void_p, ctypes.POINTER(c_uint)]
-libobjc.class_getName.restype, libobjc.class_getName.argtypes = c_char_p, [c_void_p]
-libobjc.sel_registerName.restype, libobjc.sel_registerName.argtypes = c_void_p, [c_char_p]
-# libobjc.sel_getName.restype, libobjc.sel_getName.argtypes = c_char_p, [c_void_p]
-libobjc.method_getName.restype, libobjc.method_getName.argtypes = c_void_p, [c_void_p]
-libobjc.method_getTypeEncoding.restype, libobjc.method_getTypeEncoding.argtypes = c_char_p, [c_void_p]
-libobjc.method_copyReturnType.restype, libobjc.method_copyReturnType.argtypes = c_char_p, [c_void_p]
-libobjc.method_getNumberOfArguments.restype, libobjc.method_getNumberOfArguments.argtypes = c_uint, [c_void_p]
-libobjc.method_copyArgumentType.restype, libobjc.method_copyArgumentType.argtypes = c_char_p, [c_void_p, c_uint]
+libobjc = ctypes.CDLL(find_library("objc"))
+libobjc.objc_msgSend.restype, libobjc.objc_msgSend.argtypes = ctypes.c_void_p, [ctypes.c_void_p, ctypes.c_void_p]
+libobjc.objc_getClass.restype, libobjc.objc_getClass.argtypes = ctypes.c_void_p, [ctypes.c_char_p]
+libobjc.class_copyMethodList.restype, libobjc.class_copyMethodList.argtypes = ctypes.POINTER(ctypes.c_void_p), [ctypes.c_void_p, ctypes.POINTER(ctypes.c_uint)]
+libobjc.class_getName.restype, libobjc.class_getName.argtypes = ctypes.c_char_p, [ctypes.c_void_p]
+libobjc.sel_registerName.restype, libobjc.sel_registerName.argtypes = ctypes.c_void_p, [ctypes.c_char_p]
+libobjc.sel_getName.restype, libobjc.sel_getName.argtypes = ctypes.c_char_p, [ctypes.c_void_p]
+libobjc.method_getName.restype, libobjc.method_getName.argtypes = ctypes.c_void_p, [ctypes.c_void_p]
+libobjc.method_getTypeEncoding.restype, libobjc.method_getTypeEncoding.argtypes = ctypes.c_char_p, [ctypes.c_void_p]
+libobjc.method_copyReturnType.restype, libobjc.method_copyReturnType.argtypes = ctypes.c_char_p, [ctypes.c_void_p]
+libobjc.method_getNumberOfArguments.restype, libobjc.method_getNumberOfArguments.argtypes = ctypes.c_uint, [ctypes.c_void_p]
+libobjc.method_copyArgumentType.restype, libobjc.method_copyArgumentType.argtypes = ctypes.c_char_p, [ctypes.c_void_p, ctypes.c_uint]
+libobjc.object_getClassName.restype, libobjc.object_getClassName.argtypes = ctypes.c_char_p, [ctypes.c_void_p]
+libobjc.object_getClass.restype, libobjc.object_getClass.argtypes = ctypes.c_void_p, [ctypes.c_void_p]
+libobjc.class_getSuperclass.restype, libobjc.class_getSuperclass.argtypes = ctypes.c_void_p, [ctypes.c_void_p]
 
-def objc_msgSend(obj, sel, *args, restype=c_void_p, argtypes=[]):
-  print(f"Sending {sel}({restype} {argtypes}) to {obj} with {args}")
-  exit(0)
-  libobjc.objc_msgSend.restype, libobjc.objc_msgSend.argtypes = restype, [c_void_p, c_void_p] + argtypes if argtypes else [c_void_p, c_void_p]
-  return libobjc.objc_msgSend(obj, libobjc.sel_registerName(sel.encode()), *args)
 
-libc = cdll.LoadLibrary(find_library("c"))
+def convert_arg(arg, type):
+  if isinstance(arg, str) and type is ctypes.c_char_p: return ensure_bytes(arg)
+  if isinstance(arg, str) and type is ctypes.c_void_p: return NSString.stringWithUTF8String_(arg).ptr
+  if isinstance(arg, ObjcClass): return arg.ptr
+  return arg
+
+def objc_msgSend(obj, sel, *args, restype=None, argtypes=[]):
+  base_argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+  encoded_args = [convert_arg(a, t) for a, t in zip(args, argtypes)]
+  # print(f"Sending {sel}(restype:{restype} argtypes:{argtypes}) to ptr:{obj} with args:{args}")
+  libobjc.objc_msgSend.restype, libobjc.objc_msgSend.argtypes = restype, ((base_argtypes + argtypes) if argtypes else base_argtypes)
+  return libobjc.objc_msgSend(obj, libobjc.sel_registerName(sel.encode()), *encoded_args)
+
+libc = ctypes.CDLL(find_library("c"))
 libc.malloc.argtypes = [ctypes.c_size_t]
 libc.malloc.restype = ctypes.c_void_p
 libc.free.argtypes = [ctypes.c_void_p]
 
-def dump_objc_methods(clz: c_void_p):
+# @log_wrapper
+def dump_objc_methods(clz: ctypes.c_void_p):
   methods = {}
   method_count = ctypes.c_uint()
   methods_ptr = libobjc.class_copyMethodList(clz, ctypes.byref(method_count))
   assert methods_ptr is not None, f"Failed to get methods for class {clz}"
-
   class_name = libobjc.class_getName(clz).decode('ascii')
-  print(f"Found {method_count} methods on '{class_name}'")
+  # print(f"Found {method_count} methods on '{class_name}'")
 
   for i in range(method_count.value):
     method = methods_ptr[i]
     sel_name = libobjc.sel_getName(libobjc.method_getName(method)).decode('ascii')
-    sel_encoding = libobjc.method_getTypeEncoding(method).decode('ascii')
     return_type_ptr = libobjc.method_copyReturnType(method)
     return_type = return_type_ptr.decode('ascii')
     argtypes_ptrs = [libobjc.method_copyArgumentType(method, i) for i in range(libobjc.method_getNumberOfArguments(method))]
     argtypes = [arg.decode('ascii') for arg in argtypes_ptrs]
-    print(f"\tMethod {i}: {sel_name} {sel_encoding} ({return_type} {argtypes})")
-    methods[sel_name] = {"encoding": sel_encoding, "restype": return_type, "argtypes": argtypes}
+    # print(f"\tMethod {i}: {sel_name} ({return_type} {argtypes})")
+    methods[sel_name] = {"restype": return_type, "argtypes": argtypes}
 
     # _, _ = libc.free(ctypes.cast(return_type_ptr, c_void_p)), [libc.free(ctypes.cast(argtype, c_void_p)) for argtype in argtypes_ptrs]
   libc.free(methods_ptr)
@@ -423,6 +445,7 @@ SIMPLE_TYPES = {
     '?': '<unknown-type>',
 }
 
+# @log_wrapper
 def get_methods_rec(c: ctypes.c_void_p):
   methods = {}
   while c:
@@ -434,6 +457,7 @@ def get_methods_rec(c: ctypes.c_void_p):
   return methods
 
 
+# @log_wrapper
 def objc_type_to_ctype(t: str):
   if len(t) == 1:
     return SIMPLE_TYPES[t]
@@ -441,26 +465,57 @@ def objc_type_to_ctype(t: str):
     return ctypes.POINTER(objc_type_to_ctype(t[1:]))
   elif t[0] == 'r':
     return objc_type_to_ctype(t[1:])
+  elif t.startswith("{") and "=" in t and t.endswith("}"):
+    return ctypes.Structure  # wooo! safety is out the window now
   else:
     raise ValueError(f"Unknown type {t}")
 
-def makeObjcClass(name: str) -> Any:
-  _class_ptr = libobjc.objc_getClass(ensure_bytes(name))
-  assert _class_ptr is not None, f"Class {name} not found"
-  objc_methods = {
-    # **get_methods_rec(_class_ptr),
-    **get_methods_rec(_metaclass_ptr:=libobjc.object_getClass(_class_ptr))}
 
-  for k,v in objc_methods.items():
-    print(k,v)
+class ObjcClass:
+  ptr: ctypes.c_void_p
+  methods_info: Dict[str, Dict[str, Any]]
 
-  print("#" * 80)
-  return {
-    k.replace(":", "_"): functools.partial(objc_msgSend, k, argtypes=[objc_type_to_ctype(t) for t in v["argtypes"][2:]], restype=objc_type_to_ctype(v["restype"])) #objc_msgSend(_class_ptr, k, *args, argtypes=[objc_type_to_ctype(t) for t in v["argtypes"][2:]], restype=objc_type_to_ctype(v["restype"]))
-    for k, v in objc_methods.items() # if all([t in SIMPLE_TYPES for t in v["argtypes"]]) and v["restype"] in SIMPLE_TYPES
-  }
-  # return type(name, (object,), {
-  #   k.replace(":", "_"): lambda *args: print(f"{k}({args})", k, v) #objc_msgSend(_class_ptr, k, *args, argtypes=[objc_type_to_ctype(t) for t in v["argtypes"][2:]], restype=objc_type_to_ctype(v["restype"]))
-  #   for k, v in objc_methods.items() # if all([t in SIMPLE_TYPES for t in v["argtypes"]]) and v["restype"] in SIMPLE_TYPES
-  #     # "__del__": lambda self: print(f"Deleting {name}"), # maybe release?
-  # })
+  # @log_wrapper
+  def __init__(self, name:str):
+    self.ptr = libobjc.objc_getClass(ensure_bytes(name))
+    assert self.ptr is not None, f"Class {name} not found"
+    self.methods_info = get_methods_rec(_metaclass_ptr:=libobjc.object_getClass(self.ptr))
+
+  # @log_wrapper
+  def __getattr__(self, name:str) -> Any:
+    sel_name = name.replace("_", ":")
+    if sel_name in self.methods_info:
+      method_info = self.methods_info[sel_name]
+      restype, argtypes = method_info["restype"], method_info["argtypes"]
+      # print(f"Found method {name} with restype:{restype} argtypes:{argtypes}")
+      f = functools.partial(objc_msgSend,
+        self.ptr,
+        sel_name,
+        restype=objc_type_to_ctype(restype),
+        argtypes=[objc_type_to_ctype(t) for t in argtypes[2:]])
+      # ugly hack to conditionally wrap without self referencing recursion. e.g: "f = lambda *args: g(f(*args))"
+      _f = (lambda *args, **kwargs: ObjcInstance(f(*args, **kwargs))) if restype == "@" else f
+      __f = (lambda *args, **kwargs: (_f(*args[:-1], ctypes.byref(err:=ctypes.c_void_p()), **kwargs), err)) if name.endswith("error_") else _f
+      return __f
+
+    raise AttributeError(f"Method {name} not found on {self.__class__.__name__}")
+
+
+class ObjcInstance(ObjcClass):
+  def __init__(self, ptr):
+    assert ptr is not None, f"Can't create ObjcInstance with null ptr"
+    self.ptr = ptr
+    self.methods_info = get_methods_rec(libobjc.object_getClass(self.ptr))
+
+
+NSString = ObjcClass("NSString")
+
+
+# class ObjcFramework(dotdict):
+#   pass
+
+# def objc_load_framework(name: str) -> ObjcFramework:
+
+#   pass
+
+# Foundation = objc_load_framework("Foundation")
